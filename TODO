@@ -1,0 +1,8 @@
+Things to implement (if i can be bothered)
+
+* Make "C" actually toggle colors
+
+* Allow "l" and "w" modes to be set on command line and in default options-file
+
+* Create a mode to hide user/host/database fields
+

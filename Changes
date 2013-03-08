@@ -1,3 +1,50 @@
+Version 2.3:
+
+  Released 2.3 on March 8th, 2013
+
+  * No changes introduced - first commit to github - initialized git repo
+    Only changed files so far are the changelog and the perl script "mytop"
+    itself - so everything should work right out of the box again.
+    Leave me a note if you're having and problems - or suggestions!
+   
+Version 2.2:
+
+  Released 2.2 on March 7th, 2013
+
+  * Added "l" - long mode that strips the all column names except the
+    first and last one for each select query. Makes it easier to identify
+    long queries with lots of columns. Can be turned on and off during runtime,
+    but will be used automatically on a per-query basis if the (SELECT .* FROM) 
+    part of the query is longer than half your display width.
+    
+  * Added "w" - whole query mode that actually shows the *full* sql for each
+    query - going multi-line if neccessary. Drastically reduces the number of
+    queries that can be displayed - but ot shows everything including comments.
+    Can be turned on and off during runtime.
+   
+Bersion 2.1:
+
+  Released 2.1 on June 3rd, 2011
+
+  * Added a few more (hopefully useful) statistics
+  
+Version 2.0:
+
+  Released 2.0 on January 20th, 2011
+
+  * Forked original mytop 1.6 by Jeremy D. Zawodny <Jeremy@Zawodny.com>
+    All credits for previous functions go to the appropriate authors,
+    thanks for creating a great tool! Sadly it was abandoned several years
+    ago. But because the classic "mtop" is not a real alternative for me,
+    i forked mytop 1.6 - for internal use only.
+
+  * Updated stats to work with mysql 5.0
+
+
+
+### Original changelog of the forked version
+
+  
 Version 1.6:
 
   Released 1.6 on February 16th, 2007.

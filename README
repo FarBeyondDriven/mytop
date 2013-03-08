@@ -1,14 +1,15 @@
-README for mytop version 1.4
-============================
+README for mytop
+================
 
 WEB
 
-  http://jeremy.zawodny.com/mysql/mytop/
+  For the current mytop, go to:
+    https://github.com/FarBeyondDriven/mytop
 
-MAILING LIST
-
-  http://www.advanced-mysql.com/cgi-bin/mailman/listinfo/mytop
-
+  For the original (but abandoned) mytop see:
+    http://jeremy.zawodny.com/mysql/mytop/
+    Note: This version will only work with MySQL older than 5.0
+  
 ABOUT
 
   mytop is a `top' clone for MySQL
@@ -21,7 +22,7 @@ ABOUT
 
 INSTALLATION
 
-  tar -zxvf mytop-<version>.tar.gz
+  tar -zxvf mytop-<branch>.tar.gz
   cd mytop-<version>
   perl Makefile.PL
   make
@@ -36,7 +37,9 @@ DOCUMENTATION
 
 AUTHOR
 
-  Jeremy D. Zawodny <Jeremy@Zawodny.com>
+  FarBeyondDriven <fbd@motherless.com>
+
+  Original code by Jeremy D. Zawodny <Jeremy@Zawodny.com>
 
 COPYRIGHT
 

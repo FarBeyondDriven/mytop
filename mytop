@@ -1,6 +1,7 @@
 #!/usr/bin/perl -w
-#
-# $Id: mytop,v 1.53 2003/09/18 17:58:36 jzawodn Exp $
+
+eval 'exec /usr/bin/perl -w -S $0 ${1+"$@"}'
+    if 0; # not running under some shell
 
 =pod
 
@@ -12,7 +13,7 @@ mytop - display MySQL server performance info like `top'
 
 ## most of the POD is at the bottom of the file
 
-## TODO: make 'C' toggle color
+## TODO: see the TODO file
 
 use 5.005;
 use strict;
@@ -20,7 +21,7 @@ use DBI;
 use Getopt::Long;
 use Socket;
 
-$main::VERSION = "1.6";
+$main::VERSION = "2.3";
 
 $|=1;
 $0 = 'mytop';
@@ -84,6 +85,7 @@ my %config = (
     help          => 0,
     host          => 'localhost',
     idle          => 1,
+    long          => 0,
     long_nums     => 0,
     mode          => 'top',
     prompt        => 0,
@@ -91,8 +93,9 @@ my %config = (
     port          => 3306,
     resolve       => 1,
     socket        => '',
-    sort          => 0,         # default or reverse sort ("s")
+    sort          => 1,         # default or reverse sort ("s")
     user          => 'root',
+    whole         => 0,
 );
 
 my %qcache = ();    ## The query cache--used for full query info support.
@@ -153,7 +156,6 @@ GetOptions(
     "idle|i"              => \$config{idle},
     "resolve|r"           => \$config{resolve},
     "prompt!"             => \$config{prompt},
-    "long|!"              => \$config{long_nums},
     "mode|m=s"            => \$config{mode},
     "sort=s"              => \$config{sort},
 );
@@ -164,6 +166,9 @@ if ($config{host} =~ s/:(\d+)$//)
 {
     $config{port} = $1;
 }
+
+$config{showhost} = `hostname`;
+chomp($config{showhost});
 
 ## Don't use Term::ReadKey unless running interactively.
 
@@ -423,6 +428,23 @@ while (1)
         next;
     }
 
+    ## w - whole query mode
+    if ($key =~ /w/)
+    {
+        if ($config{whole})
+        {
+            $config{whole} = 0;
+            print RED(), "-- whole query mode disabled --", RESET();
+            sleep 1;
+        }
+        else
+        {
+            $config{whole} = 1;
+            print RED(), "-- whole query mode enabled --", RESET();
+            sleep 1;
+        }
+    }
+
     ## d - database name based filter
 
     if ($key eq 'd')
@@ -496,6 +518,23 @@ while (1)
         Clear() unless $config{batchmode};
         print "InnoDB Status [hit q to exit this mode]\n";
         next;
+    }
+
+    ## l - long mode
+    if ($key =~ /l/)
+    {
+        if ($config{long})
+        {
+            $config{long} = 0;
+            print RED(), "-- long mode disabled --", RESET();
+            sleep 1;
+        }
+        else
+        {
+            $config{long} = 1;
+            print RED(), "-- long mode enabled --", RESET();
+            sleep 1;
+        }
     }
 
     ## o - sort order
@@ -696,7 +735,8 @@ sub GetData()
     if (not $config{batchmode})
     {
         ($width, $height, $wpx, $hpx) = GetTerminalSize();
-        $lines_left = $height - 2;
+        $lines_left = $height - 3;
+        $width=$width-2;
     }
     else
     {
@@ -710,7 +750,8 @@ sub GetData()
     ##
     if ($config{header})
     {
-        my @recs = Hashes("show status");
+        my @recs = Hashes("show global status");
+	#my @recs2 = Hashes("show slave status");
 
         ## if the server died or we lost connectivity
         if (not @recs)
@@ -786,6 +827,15 @@ sub GetData()
 
         $last_time = $now_time;
 
+	my $serv_type = (($STATUS{Slave_running} eq "ON")?"SLAVE":"MASTER");
+
+	if ($serv_type eq "SLAVE") {
+	    ## Seconds behind master
+	    my ($seconds_behind) =
+	      (`mysql -u root -e 'SHOW SLAVE STATUS\\G' | grep Seconds` =~ /Behind_Master: ([0-9]+)/s);
+	    $serv_type .= " (".$seconds_behind."s behind)";
+	}
+
         ## Server Uptime in meaningful terms...
 
         my $time         = $STATUS{Uptime};
@@ -800,75 +850,81 @@ sub GetData()
 
         ## Queries per second...
 
-        my $avg_queries_per_sec  = sprintf("%.2f", $STATUS{Questions} / $STATUS{Uptime});
-        my $num_queries          = $STATUS{Questions};
+        my $avg_queries_per_sec  = sprintf("%.2f", $STATUS{Queries} / $STATUS{Uptime});
+        my $num_queries          = $STATUS{Queries};
 
         my @t = localtime(time);
 
         my $current_time = sprintf "[%02d:%02d:%02d]", $t[2], $t[1], $t[0];
 
-        my $host_width = 52;
+        my $host_width = 70;
         my $up_width   = $width - $host_width;
 
         Clear() unless $config{batchmode};
         print RESET();
 
-        printf "%-${host_width}s%${up_width}s\n",
-               "MySQL on $config{host} ($db_version)",
-               "up $uptime $current_time";
+	my ($sysload) = (`cat /proc/loadavg` =~ /([0-9\.]+ [0-9\.]+ [0-9\.]+)/);
+
+        printf "MyTopFBD on ".(($config{host} eq "localhost")?$config{showhost}:$config{host}).
+	  " ($db_version) load [".$sysload."] type ".$serv_type.
+	  " up $uptime $current_time\n";
         $lines_left--;
 
 
-        printf " Queries: %-5s  qps: %4.0f Slow: %7s         Se/In/Up/De(%%):    %02.0f/%02.0f/%02.0f/%02.0f \n",
-               make_short( $STATUS{Questions} ),  # q total
-               $STATUS{Questions} / $STATUS{Uptime},  # qps, average
-               make_short( $STATUS{Slow_queries} ),    # slow
+        printf " GlobalQueries :%7s  qps: %4.0f  Slow: %5s  Cache/Sel/Ins/Upd/Del(%%): %4.1f / %4.1f / %4.1f / %4.1f / %4.1f \n",
+               make_short( $STATUS{Queries} ),  # q total
+               $STATUS{Queries} / $STATUS{Uptime},  # qps, average
+	       make_short( $STATUS{Slow_queries} ),    # slow
 
                # hmm. a Qcache hit is really a select and should be counted.
-               100 * ($STATUS{Com_select} + ($STATUS{Qcache_hits}||0) )    / $STATUS{Questions},
-               100 * ($STATUS{Com_insert} +  $STATUS{Com_replace} ) / $STATUS{Questions},
-               100 * ($STATUS{Com_update} )  / $STATUS{Questions},
-               100 * $STATUS{Com_delete} / $STATUS{Questions};
+               100 * ($STATUS{Qcache_hits} / $STATUS{Queries}),
+               100 * ($STATUS{Com_select} / $STATUS{Queries}),
+               100 * ($STATUS{Com_insert} +  $STATUS{Com_replace} ) / $STATUS{Queries},
+               100 * ($STATUS{Com_update} )  / $STATUS{Queries},
+   	       100 * $STATUS{Com_delete} / $STATUS{Queries};
 
         $lines_left--;
 
         if ($t_delta)
         {
-          my $q_diff = ( $STATUS{Questions} - $OLD_STATUS{Questions} );
+          my $q_diff = ( $STATUS{Queries} - $OLD_STATUS{Queries} );
 #          print("q_diff: $STATUS{Questions} - $OLD_STATUS{Questions}  / $t_delta = $q_diff\n");
-
-          printf("             qps now: %4.0f Slow qps: %3.1f  Threads: %4.0f (%4.0f/%4.0f) %02.0f/%02.0f/%02.0f/%02.0f \n",
-                 ( $STATUS{Questions} - $OLD_STATUS{Questions} ) / $t_delta,
-                 ( # slow now (qps)
+          printf(" CurrentQueries:%7s  Qps: %4.0f  Slow: %5s  Cache/Sel/Ins/Upd/Del(%%): %4.1f / %4.1f / %4.1f / %4.1f / %4.1f \n",
+		 make_short( $STATUS{Queries} - $OLD_STATUS{Queries} ),  # q total now
+                 ( $STATUS{Queries} - $OLD_STATUS{Queries} ) / $t_delta,
+                 make_short( # slow now (qps)
                   ($STATUS{Slow_queries} ) ?
-                  ( $STATUS{Slow_queries} - $OLD_STATUS{Slow_queries} ) / $t_delta :
-                  0
+                  ( $STATUS{Slow_queries} - $OLD_STATUS{Slow_queries} ) / $t_delta : 0
                  ),
-                 $STATUS{Threads_connected},
-                 $STATUS{Threads_running},
-                 $STATUS{Threads_cached},
 
-                 (100 * ($STATUS{Com_select} - $OLD_STATUS{Com_select} + 
-                         ($STATUS{Qcache_hits}||0) - ($OLD_STATUS{Qcache_hits}||0)
-                        ) ) / ($q_diff ),
+                 (100 * ($STATUS{Com_select} - $OLD_STATUS{Com_select}) / ($q_diff )),
+		 (100 * (($STATUS{Qcache_hits}||0) - ($OLD_STATUS{Qcache_hits}||0)) ) / ($q_diff ),
                  (100 * ($STATUS{Com_insert} - $OLD_STATUS{Com_insert} +
                          $STATUS{Com_replace} - $OLD_STATUS{Com_replace}
                         ) ) / ($q_diff ),
                  (100 * ($STATUS{Com_update} - $OLD_STATUS{Com_update}) ) / ($q_diff ),
-                 (100 * ($STATUS{Com_delete} - $OLD_STATUS{Com_delete}) ) / ($q_diff ),
+                 (100 * ($STATUS{Com_delete} - $OLD_STATUS{Com_delete}) ) / ($q_diff )
                  );
+	  printf(" Threads create/conn/run/cache: %4.0f / %4.0f / %4.0f / %4.0f   Commits/Rollbacks: %s / %s\n",
+		 $STATUS{Threads_created},
+		 $STATUS{Threads_connected},
+                 $STATUS{Threads_running},
+                 $STATUS{Threads_cached},
+		 make_short($STATUS{Com_commit}),
+		 make_short($STATUS{Com_rollback}));
         }
         else
         {
-            print "\n";
+            print "\n\n";
         }
         $lines_left--;
 
         if ($have_query_cache and $STATUS{Com_select} and $query_cache_hits)
         {
-          printf(" Cache Hits: %-5s Hits/s: %4.1f Hits now: %5.1f  Ratio: %4.1f%% Ratio now: %4.1f%% \n", 
+          printf(" GlobalCacheHits  : %-5s (%.1fhps)  Current: %-5s (%.1fhps)  GlobalRatio: %.1f%%  Current: %.1f%% \n",
                  make_short($STATUS{Qcache_hits}),        # cache hits
                  $STATUS{Qcache_hits} / $STATUS{Uptime}, # hits / sec
+		 make_short($STATUS{Qcache_hits} - ($OLD_STATUS{Qcache_hits}||0)),
                  ($t_delta) ?  ($STATUS{Qcache_hits} - $OLD_STATUS{Qcache_hits}) / $t_delta : 0,  # now / s
                  # ratio: 
                  100 * ($STATUS{Qcache_hits})  / ($STATUS{Qcache_hits} + $STATUS{Com_select} ),
@@ -881,11 +937,13 @@ sub GetData()
         }
         $lines_left--;
 
-        printf(" Key Efficiency: %2.1f%%  Bps in/out: %5s/%5s   ",
+        printf(" Key Efficiency   : %2.1f%%  I/O: %5s/%5s  GlobBps in/out: %5s/%5s  ",
                $cache_hits_percent,
+	       make_short($STATUS{Bytes_received}),
+	       make_short($STATUS{Bytes_sent}),
                make_short($STATUS{Bytes_received} / $STATUS{Uptime} ),
                make_short($STATUS{Bytes_sent} / $STATUS{Uptime}));
-        printf("Now in/out: %5s/%5s",
+        printf("Now: %5s/%5s",
                make_short(($STATUS{Bytes_received} - $OLD_STATUS{Bytes_received}) / $t_delta ),
                make_short(($STATUS{Bytes_sent} - $OLD_STATUS{Bytes_sent}) / $t_delta ))
           if ($t_delta);
@@ -952,8 +1010,12 @@ sub GetData()
         {
             $thread->{Host} =~ s/:\d+$//;
             my $host = gethostbyaddr(inet_aton($thread->{Host}), AF_INET);
-            $host =~ s/^([^.]+).*/$1/;
-            $thread->{Host} = $host;
+            if ($host)
+            {
+              $host =~ s/^([^.]+).*/$1/;
+              $thread->{Host} = $host;
+            }
+
         }
 
         ## Fix possible undefs
@@ -1026,15 +1088,21 @@ sub GetData()
 
         if ($thread->{Info})
         {
-            $smInfo = substr $thread->{Info}, 0, $free;
+            $smInfo = $thread->{Info};
         }
         elsif ($thread->{State})
         {
-            $smInfo = substr $thread->{State}, 0, $free;
+            $smInfo = $thread->{State};
         }
         else
         {
             $smInfo = "";
+        }
+
+	my $sqlmeat = 0; $sqlmeat = length($1) if ($smInfo =~ /^(.* FROM )/i);
+	if (!$config{whole} && (($config{long} && $smInfo =~ /SELECT.*,.*,.*FROM/i) || $sqlmeat*2 > ${free}))
+        {
+ 	    $smInfo =~ s/^(SELECT *[^,]+) *,.*, *([^,]+ *FROM)/$1..$2/i;
         }
 
         if ($HAS_COLOR)
@@ -1044,9 +1112,24 @@ sub GetData()
             print GREEN()  if $thread->{Command} eq 'Connect';
         }
 
-        printf "%8d %9.9s %15.15s %10.10s %9d %6.6s %-${free}.${free}s\n",
-            $thread->{Id}, $thread->{User}, $thread->{Host}, $thread->{db},
-            $thread->{Time}, $thread->{Command}, $smInfo;
+	if ($config{whole} && $thread->{Info})
+        {
+	    my $type = "(Z$free)*";
+	    my @mlines = unpack($type,$thread->{Info});
+            printf "%8d %9.9s %15.15s %10.10s %9d %6.6s %-${free}.${free}s\n",
+	            $thread->{Id}, $thread->{User}, $thread->{Host}, $thread->{db},
+	            $thread->{Time}, $thread->{Command}, shift(@mlines);
+	    foreach (@mlines) {
+	 	s/^\s+//;
+		printf "%63s%-${free}.${free}s\n","",$_;
+		$lines_left--;
+	        last if $lines_left == 0;
+            }	    
+	} else {
+	        printf "%8d %9.9s %15.15s %10.10s %9d %6.6s %-${free}.${free}s\n",
+	            $thread->{Id}, $thread->{User}, $thread->{Host}, $thread->{db},
+	            $thread->{Time}, $thread->{Command}, $smInfo;
+	}
 
         print RESET() if $HAS_COLOR;
 
@@ -1064,7 +1147,7 @@ my $questions;
 
 sub GetQPS()
 {
-    my($data) = Hashes('SHOW STATUS LIKE "Questions"');
+    my($data) = Hashes('SHOW GLOBAL STATUS LIKE "Questions"');
     my $num   = $data->{Value};
 
     if (not defined $questions) ## first time?
@@ -1096,7 +1179,7 @@ sub GetInnoDBStatus()
         }
     }
 
-    my @data = Hashes("SHOW INNODB STATUS");
+    my @data = Hashes("SHOW ENGINE INNODB STATUS");
 
     open P, "|$config{pager}" or die "$!";
     print keys %{$data[0]};
@@ -1126,7 +1209,7 @@ sub GetCmdSummary()
     }
 
     # Variable_name and Value pairs come back...
-    my @data = Hashes("SHOW STATUS LIKE 'Com_%'");
+    my @data = Hashes("SHOW GLOBAL STATUS LIKE 'Com_%'");
     my %cmd_data;
     my %cmd_delta;
     my %cmd_pct;
@@ -1216,7 +1299,7 @@ sub GetShowVariables()
 sub GetShowStatus()
 {
     Clear() unless $config{batchmode};
-    my @rows = Hashes("SHOW STATUS");
+    my @rows = Hashes("SHOW GLOBAL STATUS");
 
     printf "%32s  %10s %10s\n", 'Counter', 'Total', 'Change';
     printf "%32s  %10s %10s\n", '-------', '-----', '------';
@@ -1392,7 +1475,7 @@ sub cmd_q
 sub PrintHelp()
 {
     my $help = qq[
-Help for mytop version $main::VERSION by Jeremy D. Zawodny <${YELLOW}Jeremy\@Zawodny.com${RESET}>
+Help for mytop version $main::VERSION by FBD - original code by Jeremy D. Zawodny <${YELLOW}Jeremy\@Zawodny.com${RESET}>
 
   ? - display this screen
   # - toggle short/long numbers (not yet implemented)
@@ -1406,17 +1489,18 @@ Help for mytop version $main::VERSION by Jeremy D. Zawodny <${YELLOW}Jeremy\@Zaw
   i - toggle the display of idle (sleeping) threads
   I - show innodb status
   k - kill a thread
-  p - pause the display
+  l - long query mode - collapse column list
   m - switch [mode] to qps (queries/sec) scrolling view
   o - reverse the sort order (toggle)
+  p - pause the display
   q - quit
   r - reset the status counters (via FLUSH STATUS on your server)
   s - change the delay between screen updates
   t - switch to thread view (default)
   u - show only a specific user
+  w - whole query mode - always shows the *full* query going multi-line if neccessary
   : - enter a command (not yet implemented)
 
-${GREEN}http://jeremy.zawodny.com/mysql/mytop/${RESET}
 ];
 
     print $help;
@@ -1941,6 +2025,7 @@ having the User column appear, for example.
 
 mytop was developed and is maintained by Jeremy D. Zawodny
 (Jeremy@Zawodny.com).
+This version heavily patched to work with MySQL 5.5 by FBD.
 
 If you wish to e-mail me regarding this software, B<PLEASE> subscribe
 to the B<mytop> mailing list.  See the B<mytop> homepage for details.
