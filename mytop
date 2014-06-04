@@ -428,7 +428,7 @@ while (1)
         next;
     }
 
-    ## w - whole query mode
+    ## w - whole query mode enable/disable
     if ($key =~ /w/)
     {
         if ($config{whole})
