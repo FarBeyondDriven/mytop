@@ -1169,8 +1169,7 @@ sub GetQcacheSummary()
 
 ###########################################################################
 
-sub GetInnoDBStatus()
-{
+sub GetInnoDBStatus() {
     if (not $config{pager})
     {
         if (not $config{pager} = FindProg('less'))
@@ -1365,12 +1364,10 @@ sub FullQueryInfo($)
 
 ###########################################################################
 
-sub Explain($)
-{
+sub Explain($) {
     my $id  = shift;
 
-    if (not exists $qcache{$id} or not defined $qcache{$id})
-    {
+    if (not exists $qcache{$id} or not defined $qcache{$id}) {
         print "*** Invalid id. ***\n";
         return;
     }
@@ -1379,6 +1376,7 @@ sub Explain($)
     my $db  = $dbcache{$id};
 
     Execute("USE $db");
+
     my @info = Hashes("EXPLAIN $sql");
     print $CLEAR;
     print "EXPLAIN $sql:\n\n";
